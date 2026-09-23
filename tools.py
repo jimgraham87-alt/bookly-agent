@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import uuid
+import re
 from datetime import datetime
 
 DB_PATH = "bookly.db"
@@ -13,9 +14,19 @@ def get_db_connection():
 # --- 1. Python Execution Functions ---
 
 def lookup_order(order_id: str, email: str) -> str:
-    """Verifies identity and retrieves order, shipping, tracking, and item details."""
+    """Verifies user identity and retrieves order details.
+
+        Args:
+            order_id: The order identifier (e.g., 'ORD-1001', '1001', or 'ORD1001').
+            email: The customer's email address.
+        """
+
+    order_id = normalize_order_id(order_id)
+    email = email.strip().lower()
+
     conn = get_db_connection()
     cursor = conn.cursor()
+    # Your SQL query here...
 
     # Query order with customer email verification gate
     query_order = """
@@ -70,10 +81,14 @@ def lookup_order(order_id: str, email: str) -> str:
         "items": items
     })
 
+
 def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwanted") -> str:
-    """Deterministic business logic gate for initiating a return."""
+    order_id = normalize_order_id(order_id)
+    email = email.strip().lower()
+
     conn = get_db_connection()
     cursor = conn.cursor()
+    # Your SQL query here...
 
     # 1. Identity & Order Gate
     cursor.execute("""
@@ -200,6 +215,26 @@ def escalate_to_human(reason: str, summary: str, order_id: str = None) -> str:
             "A human representative will review our conversation and take over shortly."
         )
     })
+
+
+
+def normalize_order_id(order_id: str) -> str:
+    """
+    Normalizes user-supplied order IDs:
+    - '1003'     -> 'ORD-1003'
+    - 'ord1003'  -> 'ORD-1003'
+    - 'ord-1003' -> 'ORD-1003'
+    - 'ORD 1003' -> 'ORD-1003'
+    """
+    cleaned = str(order_id).strip()
+
+    # Extract numeric digits
+    match = re.search(r'\d+', cleaned)
+    if match:
+        digits = match.group(0)
+        return f"ORD-{digits}"
+
+    return cleaned.upper()
 
 # --- 2. Function Calling Tool Schemas ---
 
