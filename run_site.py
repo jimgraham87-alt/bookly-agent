@@ -819,4 +819,4 @@ async def serve_store():
 
 
 if __name__ == "__main__":
-    uvicorn.run("run_site:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("run_site:app", host="0.0.0.0", port=8000, reload=True)
