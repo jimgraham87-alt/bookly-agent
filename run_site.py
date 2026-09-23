@@ -725,9 +725,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     
     function formatMessage(text) {
       // Convert Markdown bold **text** to <strong>text</strong>
-      let formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      let formatted = text.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
       // Convert bullet lines "- " into bullet symbols "• "
-      formatted = formatted.replace(/^\s*-\s+/gm, '• ');
+      formatted = formatted.replace(/^\\s*-\\s+/gm, '• ');
       return formatted;
     }
 
@@ -819,4 +819,5 @@ async def serve_store():
 
 
 if __name__ == "__main__":
-    uvicorn.run("run_site:app", host="0.0.0.0", port=8000, reload=True)
+    # Runs when you click Play in PyCharm or type: python run_site.py
+    uvicorn.run("run_site:app", host="127.0.0.1", port=8000, reload=True)
