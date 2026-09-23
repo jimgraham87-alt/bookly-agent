@@ -625,7 +625,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <span class="test-badge badge-action">Action Execution</span>
             <div class="test-title">4. Disambiguation Resolution & Return</div>
             <div class="test-meta"><strong>Context:</strong> Resolves multi-item ambiguity from Test #3.</div>
-            <div class="test-expected"><strong>Expected Behavior:</strong> Invokes process_refund, marks status as initiated, and provides drop-off instructions.</div>
+            <div class="test-expected"><strong>Expected Behavior:</strong> If a continuation from test 3: Invokes process_refund, marks status as initiated, and provides drop-off instructions.<br>If an isolated test, request order information for verification before proceeding.</div>
           </div>
           <div>
             <div class="prompt-preview">"I want to return The Pragmatic Programmer"</div>

@@ -82,43 +82,44 @@ def lookup_order(order_id: str, email: str) -> str:
     })
 
 
-def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwanted") -> str:
-    order_id = normalize_order_id(order_id)
-    email = email.strip().lower()
+### **Updated** **process\_refund** **Implementation (** **tools.py** **)**
 
+def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwanted") -> str:
+    """Deterministic business logic gate for initiating a return and updating database state."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Your SQL query here...
 
-    # 1. Identity & Order Gate
+    # 1. Identity &amp; Order Gate (Standardizes inputs via normalize_order_id)
+    order_id_clean = normalize_order_id(order_id)
+    email_clean = email.strip().lower()
+
     cursor.execute("""
     SELECT o.order_id, o.customer_id, o.delivery_date, o.order_status, c.email
     FROM orders o
     JOIN customers c ON o.customer_id = c.customer_id
     WHERE LOWER(o.order_id) = LOWER(?) AND LOWER(c.email) = LOWER(?)
-    """, (order_id.strip(), email.strip()))
+    """, (order_id_clean, email_clean))
     order = cursor.fetchone()
 
     if not order:
         conn.close()
         return json.dumps({"status": "failed", "reason": "Order ID or customer email verification failed."})
 
-    # 2. Check Item Existence & Current Return State
+    # 2. Check Item Existence &amp; Current Return State
     cursor.execute("""
     SELECT oi.order_item_id, oi.unit_price, oi.item_status, b.title
     FROM order_items oi
     JOIN books b ON oi.book_id = b.book_id
     WHERE oi.order_id = ? AND oi.book_id = ?
-    """, (order_id.strip(), book_id.strip()))
+    """, (order["order_id"], book_id.strip()))
     item = cursor.fetchone()
 
     if not item:
         conn.close()
-        return json.dumps({"status": "failed", "reason": f"Book ID '{book_id}' was not found in order '{order_id}'."})
+        return json.dumps({"status": "failed", "reason": f"Book ID '{book_id}' was not found in order '{order_id_clean}'."})
 
-    # Differentiate between in-progress return and finalized refund
+    # Differentiate between in-progress return and finalized refund (Idempotency)
     if item["item_status"] == "Return Initiated":
-        # Fetch the active return details
         cursor.execute("""
         SELECT return_id, return_label_tracking 
         FROM returns 
@@ -131,7 +132,7 @@ def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwan
             "status": "in_progress",
             "reason": (
                 f"A return has already been initiated for '{item['title']}' (Return ID: {ret['return_id'] if ret else 'N/A'}). "
-                "The refund is currently pending drop-off and carrier receipt."
+                "The refund is currently pending drop-off and carrier scan."
             )
         })
 
@@ -139,35 +140,34 @@ def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwan
         conn.close()
         return json.dumps({"status": "failed", "reason": f"Item '{item['title']}' has already been returned and refunded."})
 
-    # 3. 30-Day Policy Gate Check
+    # 3. 30-Day Policy Gate Check (For delivered orders)
     delivery_date_str = order["delivery_date"]
-    if not delivery_date_str:
-        conn.close()
-        return json.dumps({"status": "failed", "reason": "Order has not been delivered yet. Cannot process return."})
+    if delivery_date_str:
+        delivery_date = datetime.strptime(delivery_date_str, "%Y-%m-%d")
+        days_since_delivery = (datetime.now() - delivery_date).days
 
-    delivery_date = datetime.strptime(delivery_date_str, "%Y-%m-%d")
-    days_since_delivery = (datetime.now() - delivery_date).days
+        if days_since_delivery > 30:
+            conn.close()
+            return json.dumps({
+                "status": "rejected",
+                "reason": f"Return window expired. Delivered {days_since_delivery} days ago (policy limit is 30 days)."
+            })
 
-    if days_since_delivery > 30:
-        conn.close()
-        return json.dumps({
-            "status": "rejected",
-            "reason": f"Return window expired. Delivered {days_since_delivery} days ago (policy limit is 30 days)."
-        })
-
-    # 4. Insert Return Record & Update Status to 'Return Initiated'
+    # 4. Insert Return Record into SQLite &amp; Update States
     return_id = f"RET-{uuid.uuid4().hex[:6].upper()}"
     return_tracking = f"RET-USPS-{uuid.uuid4().hex[:8].upper()}"
     today_str = datetime.now().strftime("%Y-%m-%d")
 
+    # A. Insert into returns table
     cursor.execute("""
     INSERT INTO returns (return_id, order_id, book_id, customer_id, return_reason, return_status, refund_amount, return_label_tracking, created_at)
     VALUES (?, ?, ?, ?, ?, 'Initiated', ?, ?, ?)
     """, (return_id, order["order_id"], book_id.strip(), order["customer_id"], reason, item["unit_price"], return_tracking, today_str))
 
+    # B. Update order_items status
     cursor.execute("UPDATE order_items SET item_status = 'Return Initiated' WHERE order_item_id = ?", (item["order_item_id"],))
 
-    # Evaluate sibling items for parent order status
+    # C. Evaluate sibling items to dynamically set parent order_status
     cursor.execute("SELECT item_status FROM order_items WHERE order_id = ?", (order["order_id"],))
     all_statuses = [r["item_status"] for r in cursor.fetchall()]
 
@@ -200,6 +200,7 @@ def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwan
             "Your refund will post automatically to your original payment method once scanned by the carrier."
         )
     })
+
 
 def escalate_to_human(reason: str, summary: str, order_id: str = None) -> str:
     """Escalates complex issues, explicit human requests, or disputes to a live support agent."""
