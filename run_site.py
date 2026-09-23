@@ -147,38 +147,49 @@ async def get_book_image(book_id: str):
     raise HTTPException(status_code=404, detail="Image not found")
 
 
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str  # Isolated per tab/device
+
+
+# Session store for message arrays: session_id -> list of message dicts
+session_histories: dict[str, list] = {}
+
+
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
-    global session_messages
     user_msg = req.message.strip()
+    session_id = req.session_id.strip()
+
     if not user_msg:
         raise HTTPException(status_code=400, detail="Empty message")
 
-    session_messages.append({"role": "user", "content": user_msg})
-    reply = run_agent_turn(session_messages)
+    if session_id not in session_histories:
+        session_histories[session_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    session_histories[session_id].append({"role": "user", "content": user_msg})
+
+    # Run turn with isolated session
+    reply = run_agent_turn(session_histories[session_id], session_id=session_id)
+
     is_escalated = "ticket #" in reply.lower()
+    return {"reply": reply, "escalated": is_escalated}
 
-    # Detect if agent confirmed adding a book to the cart
-    is_cart_add = any(
-        phrase in reply.lower()
-        for phrase in [
-            "added to your cart",
-            "added it to your cart",
-            "added to the cart",
-            "have added",
-        ]
-    )
 
-    return {"reply": reply, "escalated": is_escalated, "added_to_cart": is_cart_add}
+class ResetRequest(BaseModel):
+    session_id: str = None
 
 
 @app.post("/api/reset")
-async def reset_endpoint():
-    global session_messages
+async def reset_endpoint(req: ResetRequest = None):
+    sid = req.session_id if req else None
     reset_db()
-    reset_agent()
-    session_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    return {"status": "success", "message": "Database and conversation session reset."}
+    reset_agent(sid)
+    if sid and sid in session_histories:
+        session_histories.pop(sid, None)
+    elif not sid:
+        session_histories.clear()
+    return {"status": "success", "message": "State reset successfully."}
 
 
 HTML_TEMPLATE = """<!DOCTYPE html>
@@ -667,7 +678,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <span class="test-badge badge-sales">Catalog Q&A + Cart</span>
             <div class="test-title">7. Catalog Recommendation & Cart Add</div>
             <div class="test-meta"><strong>Context:</strong> Customer inquires about a store title.</div>
-            <div class="test-expected"><strong>Expected Behavior:</strong> Paige provides a 2-sentence summary, prompts to buy, and clicking 'Yes' bumps the Cart counter.</div>
+            <div class="test-expected"><strong>Expected Behavior:</strong> Paige provides a 2-sentence summary, prompts to buy, and clicking 'Yes' adds the item to the cart.</div>
           </div>
           <div>
             <div class="prompt-preview">"Can you tell me more about Designing Data-Intensive Applications?"</div>
@@ -758,7 +769,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     });
 
     closeBtn.addEventListener('click', () => { chatWindow.style.display = 'none'; });
+    
+// 1. Generate an isolated session ID per page load/tab
+    const currentSessionId = 'sess_' + Math.random().toString(36).substring(2, 15);
 
+    // 2. Updated sendMessage supporting both customText ("Ask Paige" / quick tests) and session_id
     async function sendMessage(customText = null) {
       const text = customText !== null ? customText.trim() : userInput.value.trim();
       if (!text) return;
@@ -772,7 +787,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text })
+          body: JSON.stringify({ 
+            message: text,
+            session_id: currentSessionId   // Isolated session
+          })
         });
         const data = await res.json();
         loadingMsg.remove();
@@ -780,7 +798,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const botMsg = appendMsg(data.reply, 'bot');
         if (data.escalated) botMsg.classList.add('escalated');
 
-        // Check if item was confirmed added to cart
+        // Preserve cart incrementation
         if (data.added_to_cart || /(added (it |the book )?to your cart|have added)/i.test(data.reply)) {
           incrementCart();
         }

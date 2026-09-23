@@ -119,39 +119,33 @@ CRITICAL SECURITY RULES:
    Tone: Proactive, polite, and concise. Avoid making the customer take unnecessary steps.
 """
 
-# Create a persistent chat session with native function calling but allow for reset via streamlit
-def _create_new_session():
-    """Initializes a fresh, empty chat session with Gemini."""
-    return client.chats.create(
-        model="gemini-3.6-flash",
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            tools=[lookup_order, process_refund, escalate_to_human],
-            temperature=0.2
+# Session Store: maps session_id -> client.chats instance
+active_sessions: dict[str, any] = {}
+
+def get_or_create_session(session_id: str):
+    """Retrieves or creates an isolated Gemini chat session for a specific browser session."""
+    if session_id not in active_sessions:
+        active_sessions[session_id] = client.chats.create(
+            model="gemini-3.6-flash",
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                tools=[lookup_order, process_refund, escalate_to_human],
+                temperature=0.2
+            )
         )
-    )
+    return active_sessions[session_id]
 
-# Active chat session instance
-chat_session = _create_new_session()
+def reset_agent(session_id: str = None):
+    """Clears either a single session or all active sessions."""
+    global active_sessions
+    if session_id:
+        active_sessions.pop(session_id, None)
+    else:
+        active_sessions.clear()
 
-def reset_agent():
-    """Resets the Gemini chat session memory back to a blank slate."""
-    global chat_session
-    chat_session = _create_new_session()
-
-
-def run_agent_turn(messages: list) -> str:
-    """
-    Sends the user's latest message to the Gemini chat session.
-    Gemini inspects the tools, runs lookup_order or process_refund automatically
-    if needed, queries SQLite, and returns the final customer-facing response.
-    """
+def run_agent_turn(messages: list, session_id: str = "default") -> str:
+    """Sends user message to the session tied strictly to this browser instance."""
+    session = get_or_create_session(session_id)
     latest_user_message = messages[-1]["content"]
-
-    # Send the user prompt to Gemini; the SDK executes the tool calls behind the scenes
-    response = chat_session.send_message(latest_user_message)
-
-    # Keep the conversation history array in sync for main.py
-    messages.append({"role": "assistant", "content": response.text})
-
+    response = session.send_message(latest_user_message)
     return response.text
