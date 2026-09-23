@@ -571,8 +571,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <main class="container">
     <div class="hero-banner">
       <div>
-        <h1>Spring Reading Sale</h1>
-        <p>Explore software engineering classics and distributed systems titles.</p>
+        <h1>Reading Sale on now!</h1>
+        <p>Explore a range of exciting title</p>
       </div>
     </div>
 
@@ -677,7 +677,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           <div class="test-card-top">
             <span class="test-badge badge-sales">Catalog Q&A + Cart</span>
             <div class="test-title">7. Catalog Recommendation & Cart Add</div>
-            <div class="test-meta"><strong>Context:</strong> Customer inquires about a store title.</div>
+            <div class="test-meta"><strong>Context:</strong> Customer inquires about a store title.<br><strong>Note:</strong> Have allowed for quering books outside of the database catalogue for demonstration purposes</div>
             <div class="test-expected"><strong>Expected Behavior:</strong> Paige provides a 2-sentence summary, prompts to buy, and clicking 'Yes' adds the item to the cart.</div>
           </div>
           <div>
@@ -698,8 +698,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <div class="chat-window" id="chatWindow">
     <div class="chat-header">
       <div>
-        <h3>Bookly Support</h3>
-        <span style="font-size: 11px; opacity: 0.85;">Online • Automated Returns</span>
+        <h3>Bookly Support Agent, Paige!</h3>
+        <span style="font-size: 11px; opacity: 0.85;">Automated returns, orders and information!</span>
       </div>
       <div class="chat-actions">
         <button id="resetBtn" title="Reset Session & Database">🔄</button>
