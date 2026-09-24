@@ -539,7 +539,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       font-size: 13.5px; 
       line-height: 1.5; 
       word-wrap: break-word; 
-      /*white-space: pre-wrap; /* Preserves paragraphs, indentation, and line breaks */
+      white-space: pre-wrap; /* Preserves paragraphs, indentation, and line breaks */
     }
   </style>
 </head>
