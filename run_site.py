@@ -11,6 +11,8 @@ from pydantic import BaseModel
 from agent import SYSTEM_PROMPT, reset_agent, run_agent_turn
 from database import reset_db
 
+from fastapi.staticfiles import StaticFiles
+
 # Ensure images directory exists
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
@@ -112,6 +114,7 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Bookly Storefront & Support Agent", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 import re
 
@@ -183,361 +186,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <meta charset="UTF-8" name="robots" content="noindex, nofollow" />
   <title>Bookly | Online Book Store</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    :root {
-      --primary: #026670;
-      --primary-dark: #01434a;
-      --accent: #ed9b40;
-      --bg: #f8f9fa;
-      --text: #2b2d42;
-      --border: #e2e8f0;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg); color: var(--text); padding-bottom: 90px; }
-
-    .top-bar { background: #013237; color: #fff; font-size: 13px; text-align: center; padding: 7px; font-weight: 500; }
-    header { background: var(--primary); color: white; padding: 14px 40px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-    .brand { font-size: 26px; font-weight: 800; color: white; text-decoration: none; }
-    .search-bar { flex: 1; max-width: 600px; display: flex; }
-    .search-bar input { width: 100%; padding: 10px 14px; border: none; border-radius: 4px 0 0 4px; font-size: 14px; outline: none; }
-    .search-bar button { background: var(--accent); border: none; padding: 10px 20px; border-radius: 0 4px 4px 0; color: white; font-weight: 700; cursor: pointer; }
-    .header-links { font-size: 14px; display: flex; gap: 20px; font-weight: 500; align-items: center; }
-
-    /* Dynamic Cart Badge */
-    #cartHeader {
-      background: rgba(255, 255, 255, 0.15);
-      padding: 6px 14px;
-      border-radius: 20px;
-      font-weight: 700;
-      transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s;
-      cursor: pointer;
-    }
-    #cartHeader.cart-bump {
-      transform: scale(1.15);
-      background: var(--accent);
-    }
-
-    .nav-ribbon { background: white; border-bottom: 1px solid var(--border); padding: 10px 40px; display: flex; gap: 25px; font-size: 14px; font-weight: 600; }
-    .nav-ribbon a { text-decoration: none; color: #4a5568; }
-    .nav-ribbon a:hover { color: var(--primary); }
-
-    .container { max-width: 1200px; margin: 25px auto; padding: 0 20px; }
-    .hero-banner { background: linear-gradient(135deg, #026670, #9fedd7); color: #013237; border-radius: 8px; padding: 35px; margin-bottom: 30px; }
-    .hero-banner h1 { font-size: 30px; margin-bottom: 8px; }
-
-    .section-title { font-size: 22px; font-weight: 800; margin-bottom: 20px; border-bottom: 2.5px solid var(--primary); padding-bottom: 6px; display: inline-block; }
-
-    /* Genre Row & Product Styling */
-    .genre-row { margin-bottom: 36px; }
-    .genre-title {
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--primary-dark);
-      margin-bottom: 14px;
-      padding-bottom: 6px;
-      border-bottom: 1.5px solid var(--border);
-    }
-    .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 20px; }
-    .product-card { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; }
-    .product-card:hover { box-shadow: 0 6px 14px rgba(0,0,0,0.06); }
-
-    /* Cover Image Container */
-    .book-cover {
-      position: relative; /* Needed to anchor the badge overlay */
-      height: 220px;
-      background: #edf2f7;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      margin-bottom: 12px;
-    }
-    .book-cover-img {
-      height: 100%;
-      width: auto;
-      max-width: 100%;
-      object-fit: cover;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
-      border-radius: 3px;
-      transition: transform 0.2s ease;
-    }
-    .product-card:hover .book-cover-img {
-      transform: scale(1.04);
-    }
-    .book-fallback-cover {
-      font-size: 48px;
-    }
-
-    /* Ask Paige Floating Badge */
-    .ai-info-badge {
-      position: absolute;
-      bottom: 8px;
-      right: 8px;
-      background: rgba(2, 102, 112, 0.92);
-      color: white;
-      border: 1px solid rgba(255, 255, 255, 0.4);
-      backdrop-filter: blur(4px);
-      padding: 5px 11px;
-      border-radius: 16px;
-      font-size: 11.5px;
-      font-weight: 700;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-      transition: all 0.2s ease;
-      z-index: 5;
-    }
-    .ai-info-badge:hover {
-      background: var(--accent);
-      transform: scale(1.06);
-    }
-
-    .book-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
-    .author { font-size: 12px; color: #718096; margin-bottom: 8px; }
-    .book-price { font-size: 18px; font-weight: 800; color: #c53030; margin-bottom: 12px; }
-    .btn-buy { background: var(--primary); color: white; border: none; padding: 9px; border-radius: 4px; font-weight: 600; cursor: pointer; }
-
-/* Floating Chat Bubble */
-    .chat-bubble-launcher {
-      position: fixed;
-      bottom: 25px;
-      right: 25px;
-      width: 65px;
-      height: 65px;
-      background: var(--primary);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
-      cursor: pointer;
-      z-index: 9999;
-      overflow: hidden;
-      border: 2px solid white;
-      transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    }
-    .chat-bubble-launcher:hover { 
-      transform: scale(1.1); 
-    }
-    .chat-bubble-launcher img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-
-    /* Chat Window */
-    .chat-window {
-      position: fixed;
-      bottom: 95px;
-      right: 25px;
-      width: 380px;
-      height: 520px;
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-      display: none;
-      flex-direction: column;
-      overflow: hidden;
-      z-index: 9999;
-      border: 1px solid var(--border);
-    }
-    .chat-header {
-      background: var(--primary);
-      color: white;
-      padding: 14px 18px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .chat-header h3 { font-size: 15px; font-weight: 600; }
-    .chat-actions { display: flex; gap: 10px; }
-    .chat-actions button { background: none; border: none; color: white; cursor: pointer; font-size: 16px; opacity: 0.85; }
-    .chat-actions button:hover { opacity: 1; }
-
-    .chat-messages {
-      flex: 1;
-      padding: 16px;
-      overflow-y: auto;
-      background: #fbfbfb;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .msg { max-width: 82%; padding: 10px 14px; border-radius: 12px; font-size: 13.5px; line-height: 1.45; word-wrap: break-word; }
-    .msg.bot { background: white; border: 1px solid var(--border); align-self: flex-start; border-bottom-left-radius: 2px; }
-    .msg.user { background: var(--primary); color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
-    .msg.escalated { border-left: 4px solid var(--accent); background: #fff8ee; }
-
-    .chat-input-area {
-      padding: 12px;
-      background: white;
-      border-top: 1px solid var(--border);
-      display: flex;
-      gap: 8px;
-    }
-    .chat-input-area input {
-      flex: 1;
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      outline: none;
-      font-size: 13.5px;
-    }
-    .chat-input-area button {
-      background: var(--primary);
-      color: white;
-      border: none;
-      padding: 0 16px;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    
-    /* Test Case Suite Section */
-    .tester-guide-section {
-      margin-top: 50px;
-      padding-top: 30px;
-      border-top: 2px dashed var(--border);
-    }
-    .tester-header {
-      margin-bottom: 22px;
-    }
-    .tester-header h2 {
-      font-size: 22px;
-      font-weight: 800;
-      color: var(--primary-dark);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .tester-header p {
-      font-size: 14px;
-      color: #555;
-      margin-top: 4px;
-    }
-    .test-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-      gap: 18px;
-    }
-    .test-card {
-      background: white;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 18px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.03);
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-    .test-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 14px rgba(0,0,0,0.07);
-    }
-    .test-card-top {
-      margin-bottom: 12px;
-    }
-    .test-badge {
-      display: inline-block;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      padding: 3px 8px;
-      border-radius: 12px;
-      margin-bottom: 8px;
-    }
-    .badge-gate { background: #e3f2fd; color: #0d47a1; }
-    .badge-lookup { background: #e8f5e9; color: #1b5e20; }
-    .badge-action { background: #ede7f6; color: #4a148c; }
-    .badge-policy { background: #ffebee; color: #b71c1c; }
-    .badge-escalate { background: #fff3e0; color: #e65100; }
-    .badge-sales { background: #e0f2f1; color: #004d40; }
-
-    .test-title {
-      font-size: 15px;
-      font-weight: 700;
-      color: #1a202c;
-      margin-bottom: 6px;
-    }
-    .test-meta {
-      font-size: 12.5px;
-      color: #64748b;
-      margin-bottom: 10px;
-      line-height: 1.4;
-    }
-    .test-expected {
-      font-size: 12.5px;
-      background: #f8fafc;
-      border-left: 3px solid var(--primary);
-      padding: 8px 10px;
-      border-radius: 0 4px 4px 0;
-      margin-bottom: 14px;
-      color: #334155;
-    }
-    .prompt-preview {
-      background: #f1f5f9;
-      border: 1px solid #cbd5e1;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 13px;
-      font-family: monospace;
-      color: #0f172a;
-      margin-bottom: 12px;
-      word-break: break-word;
-    }
-    .btn-test-run {
-      background: var(--primary);
-      color: white;
-      border: none;
-      padding: 9px 14px;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      transition: background 0.15s ease;
-      width: 100%;
-    }
-    .btn-test-run:hover {
-      background: var(--primary-dark);
-    }
-    .msg.bot ul {
-      margin: 8px 0 8px 18px;
-      padding: 0;
-    }
-    .msg.bot li {
-      margin-bottom: 4px;
-    }
-    
-    .msg { 
-      max-width: 82%; 
-      padding: 10px 14px; 
-      border-radius: 12px; 
-      font-size: 13.5px; 
-      line-height: 1.5; 
-      word-wrap: break-word; 
-      white-space: pre-wrap; /* Preserves paragraphs, indentation, and line breaks */
-    }
-    
-    .badge-sales { background: #e0f2f1; color: #004d40; }
-    
-    .badge-info { background: #e1f5fe; color: #01579b; }
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
   <div class="top-bar">Fast & Tracked Delivery | 30-Day Easy Returns</div>
 
   <header>
-    <a href="#" class="brand">📖 Bookly</a>
+    <a href="#" class="brand"><img src="/images/logo"> Bookly</a>
     <div class="search-bar">
       <input type="text" placeholder="Search title, author, or ISBN...">
       <button>Search</button>
@@ -560,8 +219,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <main class="container">
     <div class="hero-banner">
       <div>
-        <h1>Reading Sale on now!</h1>
-        <p>Explore a range of exciting title</p>
+        <h1>Reading Sale on now</h1>
+        <p>Explore a range of exciting titles!</p>
       </div>
     </div>
 
@@ -570,6 +229,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <!-- DYNAMIC_GENRE_ROWS -->
     </div>
     <!-- TEST CASE SUITE FOR EVALUATORS -->
+    <hr class="section-divider">
     <section class="tester-guide-section">
       <div class="tester-header">
         <h2>🧪 Test Scenarios</h2>
@@ -718,6 +378,41 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       </div>
     </section>
   </main>
+
+  <footer class="site-footer">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <h3>📚 Bookly</h3>
+        <p>Your online bookstore for fiction, non-fiction, and everything in between — with support that actually knows your order.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Shop</h4>
+        <a href="#">Browse Catalog</a>
+        <a href="#">New Releases</a>
+        <a href="#">Bestsellers</a>
+      </div>
+      <div class="footer-col">
+        <h4>Support</h4>
+        <a href="#">Track an Order</a>
+        <a href="#">Returns & Refunds</a>
+        <a href="#">Shipping Info</a>
+        <a href="#">Contact Us</a>
+      </div>
+      <div class="footer-col">
+        <h4>Company</h4>
+        <a href="#">About</a>
+        <a href="#">Careers</a>
+        <a href="#">Blog</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 Bookly, Inc. All rights reserved.</span>
+      <div>
+        <a href="#">Privacy Policy</a>
+        <a href="#">Terms of Service</a>
+      </div>
+    </div>
+  </footer>
 
 <!-- Floating Launcher -->
   <div class="chat-bubble-launcher" id="chatLauncher" title="Chat with Paige!">
