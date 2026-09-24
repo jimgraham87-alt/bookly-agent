@@ -233,7 +233,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <section class="tester-guide-section">
       <div class="tester-header">
         <h2>🧪 Test Scenarios</h2>
-        <p>Click <strong>"Run Test 💬"</strong> on any card to launch Paige and automatically execute the scenario.</p>
+        <p>Click <strong>"Run Test 💬"</strong> on any card to launch Paige and automatically execute the scenario.</p><br/>
       </div>
 
       <div class="test-grid">
@@ -394,8 +394,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <div class="footer-col">
         <h4>Support</h4>
         <a href="#" onclick="runTestCase('Hi, I would like to check the status of my order.'); return false;">Track an Order</a>
-        <a href="#" onclick="runTestCase('Tell me about your returns policy'); return false;">Track an Order</a>
-        <a href="#" onclick="runTestCase('Hi, I would like to ask about shipping'); return false;">Track an Order</a>
+        <a href="#" onclick="runTestCase('Tell me about your returns policy'); return false;">Returns & Refunds</a>
+        <a href="#" onclick="runTestCase('Hi, I would like to ask about shipping'); return false;">Shipping</a>
         <a href="#">Contact Us</a>
       </div>
       <div class="footer-col">
