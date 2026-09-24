@@ -202,7 +202,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <button>Search</button>
     </div>
     <div class="header-links">
-      <span>Track Order</span>
+      <span><a href="#" onclick="runTestCase('Hi, I would like to check the status of my order.'); return false;">Track an Order</a></span>
       <span>Sign In</span>
       <span id="cartHeader">Cart (<span id="cartCount">0</span>)</span>
     </div>
@@ -393,9 +393,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       </div>
       <div class="footer-col">
         <h4>Support</h4>
-        <a href="#">Track an Order</a>
-        <a href="#">Returns & Refunds</a>
-        <a href="#">Shipping Info</a>
+        <a href="#" onclick="runTestCase('Hi, I would like to check the status of my order.'); return false;">Track an Order</a>
+        <a href="#" onclick="runTestCase('Tell me about your returns policy'); return false;">Track an Order</a>
+        <a href="#" onclick="runTestCase('Hi, I would like to ask about shipping'); return false;">Track an Order</a>
         <a href="#">Contact Us</a>
       </div>
       <div class="footer-col">
