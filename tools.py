@@ -81,12 +81,20 @@ def lookup_order(order_id: str, email: str) -> str:
         "items": items
     })
 
-def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwanted") -> str:
-    """Deterministic business logic gate for initiating a return and updating database state."""
+def process_refund(order_id: str, email: str, book_ids: list[str], reason: str = "Unwanted") -> str:
+    """Deterministic business logic gate for initiating a return. Covers ALL chosen
+    items on the order under a single Return Authorization -- one return_id and one
+    prepaid label for the whole parcel, matching how a real multi-item return ships.
+
+        Args:
+            order_id: The order identifier (e.g., 'ORD-1001', '1001', or 'ORD1001').
+            email: The customer's email address, used to verify identity.
+            book_ids: One or more book IDs from this order to return together.
+            reason: Optional free-text reason for the return.
+        """
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 1. Identity &amp; Order Gate (Standardizes inputs via normalize_order_id)
     order_id_clean = normalize_order_id(order_id)
     email_clean = email.strip().lower()
 
@@ -102,47 +110,12 @@ def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwan
         conn.close()
         return json.dumps({"status": "failed", "reason": "Order ID or customer email verification failed."})
 
-    # 2. Check Item Existence &amp; Current Return State
-    cursor.execute("""
-    SELECT oi.order_item_id, oi.unit_price, oi.item_status, b.title
-    FROM order_items oi
-    JOIN books b ON oi.book_id = b.book_id
-    WHERE oi.order_id = ? AND oi.book_id = ?
-    """, (order["order_id"], book_id.strip()))
-    item = cursor.fetchone()
-
-    if not item:
-        conn.close()
-        return json.dumps({"status": "failed", "reason": f"Book ID '{book_id}' was not found in order '{order_id_clean}'."})
-
-    # Differentiate between in-progress return and finalized refund (Idempotency)
-    if item["item_status"] == "Return Initiated":
-        cursor.execute("""
-        SELECT return_id, return_label_tracking 
-        FROM returns 
-        WHERE order_id = ? AND book_id = ? 
-        ORDER BY created_at DESC LIMIT 1
-        """, (order["order_id"], book_id.strip()))
-        ret = cursor.fetchone()
-        conn.close()
-        return json.dumps({
-            "status": "in_progress",
-            "reason": (
-                f"A return has already been initiated for '{item['title']}' (Return ID: {ret['return_id'] if ret else 'N/A'}). "
-                "The refund is currently pending drop-off and carrier scan."
-            )
-        })
-
-    if item["item_status"] == "Refunded":
-        conn.close()
-        return json.dumps({"status": "failed", "reason": f"Item '{item['title']}' has already been returned and refunded."})
-
-    # 3. 30-Day Policy Gate Check (For delivered orders)
+    # 30-day window is evaluated once at the order level -- every item on one
+    # order shares the same delivery date.
     delivery_date_str = order["delivery_date"]
     if delivery_date_str:
         delivery_date = datetime.strptime(delivery_date_str, "%Y-%m-%d")
         days_since_delivery = (datetime.now() - delivery_date).days
-
         if days_since_delivery > 30:
             conn.close()
             return json.dumps({
@@ -150,24 +123,64 @@ def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwan
                 "reason": f"Return window expired. Delivered {days_since_delivery} days ago (policy limit is 30 days)."
             })
 
-    # 4. Insert Return Record into SQLite &amp; Update States
+    eligible_items = []
+    already_in_progress = []
+    already_refunded = []
+    not_found = []
+
+    for book_id in book_ids:
+        cursor.execute("""
+        SELECT oi.order_item_id, oi.unit_price, oi.item_status, b.title
+        FROM order_items oi
+        JOIN books b ON oi.book_id = b.book_id
+        WHERE oi.order_id = ? AND oi.book_id = ?
+        """, (order["order_id"], book_id.strip()))
+        item = cursor.fetchone()
+
+        if not item:
+            not_found.append(book_id)
+            continue
+        if item["item_status"] == "Return Initiated":
+            already_in_progress.append(item["title"])
+            continue
+        if item["item_status"] == "Refunded":
+            already_refunded.append(item["title"])
+            continue
+
+        eligible_items.append({
+            "order_item_id": item["order_item_id"],
+            "book_id": book_id.strip(),
+            "title": item["title"],
+            "unit_price": item["unit_price"],
+        })
+
+    if not eligible_items:
+        conn.close()
+        return json.dumps({
+            "status": "failed",
+            "reason": "None of the requested items are eligible for a new return.",
+            "already_in_progress": already_in_progress,
+            "already_refunded": already_refunded,
+            "not_found": not_found,
+        })
+
+    # One Return Authorization covers every eligible item from this call.
     return_id = f"RET-{uuid.uuid4().hex[:6].upper()}"
     return_tracking = f"RET-USPS-{uuid.uuid4().hex[:8].upper()}"
     today_str = datetime.now().strftime("%Y-%m-%d")
+    total_refund = 0.0
 
-    # A. Insert into returns table
-    cursor.execute("""
-    INSERT INTO returns (return_id, order_id, book_id, customer_id, return_reason, return_status, refund_amount, return_label_tracking, created_at)
-    VALUES (?, ?, ?, ?, ?, 'Initiated', ?, ?, ?)
-    """, (return_id, order["order_id"], book_id.strip(), order["customer_id"], reason, item["unit_price"], return_tracking, today_str))
+    for item in eligible_items:
+        cursor.execute("""
+        INSERT INTO returns (return_id, order_id, book_id, customer_id, return_reason, return_status, refund_amount, return_label_tracking, created_at)
+        VALUES (?, ?, ?, ?, ?, 'Initiated', ?, ?, ?)
+        """, (return_id, order["order_id"], item["book_id"], order["customer_id"], reason, item["unit_price"], return_tracking, today_str))
+        cursor.execute("UPDATE order_items SET item_status = 'Return Initiated' WHERE order_item_id = ?", (item["order_item_id"],))
+        total_refund += item["unit_price"]
 
-    # B. Update order_items status
-    cursor.execute("UPDATE order_items SET item_status = 'Return Initiated' WHERE order_item_id = ?", (item["order_item_id"],))
-
-    # C. Evaluate sibling items to dynamically set parent order_status
+    # Evaluate sibling items to dynamically set parent order_status
     cursor.execute("SELECT item_status FROM order_items WHERE order_id = ?", (order["order_id"],))
     all_statuses = [r["item_status"] for r in cursor.fetchall()]
-
     if all(s == "Return Initiated" for s in all_statuses):
         new_order_status = "Return Initiated"
     elif any(s in ("Return Initiated", "Refunded") for s in all_statuses):
@@ -175,26 +188,27 @@ def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwan
     else:
         new_order_status = order["order_status"]
 
-    cursor.execute(
-        "UPDATE orders SET order_status = ? WHERE order_id = ?",
-        (new_order_status, order["order_id"])
-    )
-
+    cursor.execute("UPDATE orders SET order_status = ? WHERE order_id = ?", (new_order_status, order["order_id"]))
     conn.commit()
     conn.close()
 
     return json.dumps({
         "status": "success",
         "return_id": return_id,
-        "book_title": item["title"],
-        "pending_refund_amount": f"${item['unit_price']:.2f}",
+        "items": [{"title": i["title"], "refund_amount": f"${i['unit_price']:.2f}"} for i in eligible_items],
+        "pending_refund_amount": f"${total_refund:.2f}",
         "return_tracking": return_tracking,
         "order_status": new_order_status,
+        "skipped": {
+            "already_in_progress": already_in_progress,
+            "already_refunded": already_refunded,
+            "not_found": not_found,
+        },
         "instructions": (
-            "1. Locate the prepaid return shipping sticker included in your original Bookly package. "
-            "2. Affix the sticker over the original shipping label. "
+            "1. Repack the returned book(s) together in the original packaging where possible. "
+            "2. Affix the single prepaid return label (included in the parcel) over the original shipping label. "
             "3. Drop the package off at any USPS drop box or post office. "
-            "Your refund will post automatically to your original payment method once scanned by the carrier."
+            "Your refund will process as soon as Bookly confirms receipt of the return item/s."
         )
     })
 

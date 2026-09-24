@@ -67,7 +67,7 @@ def start_chat():
 
             # 3. Process Safe Turn
             messages.append({"role": "user", "content": raw_input})
-            agent_response = run_agent_turn(messages)
+            agent_response, tools_called = run_agent_turn(messages)
             print(f"\nPaige: {agent_response}\n" + "-" * 65 + "\n")
 
         except KeyboardInterrupt:

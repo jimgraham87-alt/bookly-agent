@@ -1,4 +1,5 @@
 import os
+import json
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -73,10 +74,12 @@ FORMATTING (never use raw HTML)
     IF a customer wishes to cancel an order with a status of "Processing" call cancel_order function.
     Only when you hear back from the function can you inform the customer that their order has been cancelled.
 
-- process_refund(order_id, email, book_id) | return_id, prepaid_label_status
-    This tool name implies a refund is being processed/completed, however the function here is
-    simply to initiate a return. Regardless of order status being "in transit" or "delivered", you may still
-    initiate the process_refund call
+- process_refund(order_id, email, book_ids) | return_id, prepaid_label_status
+      Creates ONE return record covering every book_id passed in, with a single
+      prepaid label for the whole parcel. Call it ONCE per return request with the
+      full list of every book_id the customer chose — never call it separately per
+      item, even for a multi-item return. This does NOT move money; the store's
+      policy is that a refund only releases after Bookly has confirmed receipt of the return items.
 
 - add_to_cart(book_id) | add book to cart and confirm
   Do not tell a user that their book has been added to cart until the tool responds
@@ -139,16 +142,14 @@ with no defined behavior —):
 
 
 Step D — Execute:
- - Call `process_refund(order_id, email, book_id)` for each chosen item.
- - On success, confirm: Return ID, item title(s), and the refund amount that will
-   release. Provide return instructions:
-     1) Repack the book in its original packaging.
-     2) Affix the prepaid return label (included in the parcel) over the
-        original shipping label.
-     3) Drop off at any carrier drop box or post office.
- - State once, in this same message, that the refund releases automatically to
-   the original payment method once the carrier scans the label. Do not repeat
-   this a second time later in the same turn.
+  - Call `process_refund(order_id, email, book_ids)` ONCE with the full list of
+    every book_id the customer chose (a single-item list if only one).
+  - On success, confirm: the one Return ID, each item's title, and the total
+    refund amount that will release. Provide return instructions:
+      1) Repack the book(s) together in their original packaging where possible.
+      2) Affix the ONE prepaid return label (included in the parcel) over the
+         original shipping label.
+      3) Drop off at any carrier drop box or post office.
 
         
         
@@ -218,6 +219,10 @@ SHIPPING & GENERAL POLICY QUESTIONS
 Tone throughout: polite, helpful, concise. Minimize steps required of the customer.
 """
 
+TOOL_FUNCTIONS = [lookup_order, process_refund, escalate_to_human, get_current_date, cancel_order, add_to_cart,lookup_book, get_shipping_info, get_store_policy]
+TOOL_MAPPING = {fn.__name__: fn for fn in TOOL_FUNCTIONS}
+MAX_TOOL_ROUNDS = 6
+
 # Session Store: maps session_id -> client.chats instance
 active_sessions: dict[str, any] = {}
 
@@ -228,7 +233,8 @@ def get_or_create_session(session_id: str):
             model="gemini-3.6-flash",
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
-                tools=[lookup_order, process_refund, escalate_to_human, get_current_date, cancel_order, add_to_cart, lookup_book, get_shipping_info, get_store_policy],
+                tools=TOOL_FUNCTIONS,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 temperature=0.2
             )
         )
@@ -242,9 +248,50 @@ def reset_agent(session_id: str = None):
     else:
         active_sessions.clear()
 
-def run_agent_turn(messages: list, session_id: str = "default") -> str:
+def _execute_tool_call(function_call) -> dict:
+    name = function_call.name
+    args = dict(function_call.args or {})
+    fn = TOOL_MAPPING.get(name)
+
+    if fn is None:
+        result = {"status": "failed", "reason": f"Unknown tool '{name}' requested."}
+    else:
+        try:
+            raw_result = fn(**args)
+            result = json.loads(raw_result) if isinstance(raw_result, str) else raw_result
+        except Exception as e:
+            result = {"status": "failed", "reason": f"Tool '{name}' raised an error: {e}"}
+
+    return {"name": name, "args": args, "result": result}
+
+def run_agent_turn(messages: list, session_id: str = "default") -> tuple[str, list[dict]]:
     session = get_or_create_session(session_id)
     latest_user_message = messages[-1]["content"]
-    response = session.send_message(latest_user_message)
 
-    return response.text
+    response = session.send_message(latest_user_message)
+    tools_called: list[dict] = []
+
+    for _ in range(MAX_TOOL_ROUNDS):
+        parts = response.candidates[0].content.parts or []
+        function_calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
+
+        if not function_calls:
+            return response.text, tools_called
+
+        response_parts = []
+        for call in function_calls:
+            call_record = _execute_tool_call(call)
+            tools_called.append(call_record)
+            response_parts.append(
+                types.Part.from_function_response(
+                    name=call_record["name"],
+                    response={"result": call_record["result"]},
+                )
+            )
+
+        response = session.send_message(response_parts)
+
+    return (
+        "I'm having trouble completing that request right now. I've flagged this for our support team to look into.",
+        tools_called,
+    )

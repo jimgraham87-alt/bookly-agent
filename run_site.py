@@ -158,10 +158,15 @@ async def chat_endpoint(req: ChatRequest):
     session_histories[session_id].append({"role": "user", "content": user_msg})
 
     # Run turn with isolated session
-    reply = run_agent_turn(session_histories[session_id], session_id=session_id)
+    reply, tools_called = run_agent_turn(session_histories[session_id], session_id=session_id)
 
-    is_escalated = "ticket #" in reply.lower()
-    return {"reply": reply, "escalated": is_escalated}
+    called_names = {t["name"] for t in tools_called}
+    is_escalated = "escalate_to_human" in called_names
+    added_to_cart = "add_to_cart" in called_names and any(
+        t["result"].get("status") == "success" for t in tools_called if t["name"] == "add_to_cart"
+    )
+
+    return {"reply": reply, "escalated": is_escalated, "added_to_cart": added_to_cart}
 
 
 class ResetRequest(BaseModel):
@@ -397,7 +402,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <footer class="site-footer">
     <div class="footer-grid">
       <div class="footer-brand">
-        <h3>📚 Bookly</h3>
+        <h3><a href="#" class="brand"><img src="/images/logo"> Bookly</a></h3>
         <p>Your online bookstore for fiction, non-fiction, and everything in between — with support that actually knows your order.</p>
       </div>
       <div class="footer-col">
@@ -456,6 +461,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   </div>
 
   <script>
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('a[href="#"]');
+      if (link) e.preventDefault();
+    });
+  
     const launcher = document.getElementById('chatLauncher');
     const chatWindow = document.getElementById('chatWindow');
     const closeBtn = document.getElementById('closeChatBtn');

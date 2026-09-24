@@ -72,20 +72,21 @@ def init_db():
 
     # 5. Returns Table
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS returns (
-            return_id TEXT PRIMARY KEY,
-            order_id TEXT NOT NULL,
-            book_id TEXT NOT NULL,
-            customer_id TEXT NOT NULL,
-            return_reason TEXT,
-            return_status TEXT NOT NULL,
-            refund_amount REAL NOT NULL,
-            return_label_tracking TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (order_id) REFERENCES orders (order_id),
-            FOREIGN KEY (book_id) REFERENCES books (book_id),
-            FOREIGN KEY (customer_id) REFERENCES customers (customer_id)
-        );
+            CREATE TABLE IF NOT EXISTS returns (
+                return_item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                return_id TEXT NOT NULL,       -- shared by every item in the same return request
+                order_id TEXT NOT NULL,
+                book_id TEXT NOT NULL,
+                customer_id TEXT NOT NULL,
+                return_reason TEXT,
+                return_status TEXT NOT NULL,
+                refund_amount REAL NOT NULL,
+                return_label_tracking TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (order_id) REFERENCES orders (order_id),
+                FOREIGN KEY (book_id) REFERENCES books (book_id),
+                FOREIGN KEY (customer_id) REFERENCES customers (customer_id)
+            );
         """)
 
     # --- Seed Data ---
