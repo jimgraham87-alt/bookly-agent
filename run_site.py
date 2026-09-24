@@ -375,6 +375,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <button class="btn-test-run" onclick="runTestCase('I forgot my password, how do I get back into my account?')">Run Test 💬</button>
           </div>
         </div>
+        
+        <!-- Test 11 -->
+        <div class="test-card">
+          <div class="test-card-top">
+            <span class="test-badge badge-action">Order Cancellation Gate</span>
+            <div class="test-title">11. Cancel Order Before Shipment</div>
+            <div class="test-meta"><strong>Context:</strong> ORD-1004 • taylor@example.com (placed today, still Processing — hasn't shipped).</div>
+            <div class="test-expected"><strong>Expected Behavior:</strong> Because shipping_status == "Processing", calls cancel_order rather than process_refund. Confirms the cancellation and that payment will be reversed, and does not proceed into the return/disambiguation flow.</div>
+          </div>
+          <div>
+            <div class="prompt-preview">"I just placed order 1004 by mistake and want to cancel it. My email is taylor@example.com"</div>
+            <button class="btn-test-run" onclick="runTestCase('I just placed order 1004 by mistake and want to cancel it. My email is taylor@example.com')">Run Test 💬</button>
+          </div>
+        </div>
+        
       </div>
     </section>
   </main>

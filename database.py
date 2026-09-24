@@ -94,7 +94,8 @@ def init_db():
     customers = [
         ("CUST-01", "Alex Rivera", "alex@example.com", "123 Main St, Springfield", "1990-05-12", 120, 145.00),
         ("CUST-02", "Sarah Chen", "sarah@example.com", "456 Oak Rd, Seattle", "1985-11-23", 50, 40.00),
-        ("CUST-03", "Jordan Hayes", "jordan@example.com", "789 Pine Ave, Austin", "1994-03-30", 210, 230.50)
+        ("CUST-03", "Jordan Hayes", "jordan@example.com", "789 Pine Ave, Austin", "1994-03-30", 210, 230.50),
+        ("CUST-04", "Taylor Kim", "taylor@example.com", "22 Birch Ln, Denver", "1998-07-19", 15, 50.00)
     ]
     cursor.executemany("INSERT OR IGNORE INTO customers VALUES (?, ?, ?, ?, ?, ?, ?)", customers)
 
@@ -114,6 +115,7 @@ def init_db():
 
     # Dynamic Dates for realistic testing
     today = datetime.now()
+    d_today = today.strftime("%Y-%m-%d")
     d_recent = (today - timedelta(days=5)).strftime("%Y-%m-%d")
     d_yesterday = (today - timedelta(days=1)).strftime("%Y-%m-%d")
     d_tomorrow = (today + timedelta(days=2)).strftime("%Y-%m-%d")
@@ -121,12 +123,13 @@ def init_db():
 
     # Seed Orders
     orders = [
-        # ORD-1001: Delivered recently, eligible for return
-        ("ORD-1001", "CUST-01", d_recent, d_yesterday, d_yesterday, "FedEx", "FDX-99201", "Delivered", 45.00, "Credit Card", "Delivered"),
-        # ORD-1002: Delivered 45 days ago, ineligible for return (>30 days)
-        ("ORD-1002", "CUST-02", d_expired, d_expired, d_expired, "USPS", "9400111202", "Delivered", 40.00, "PayPal", "Delivered"),
-        # ORD-1003: In Transit (perfect for "where is my order?" test case)
-        ("ORD-1003", "CUST-03", d_yesterday, None, d_tomorrow, "UPS", "1Z999AA10123456784", "In Transit", 95.00, "Credit Card", "Active")
+        ("ORD-1001", "CUST-01", d_recent, d_yesterday, d_yesterday, "FedEx", "FDX-99201", "Delivered", 45.00,
+         "Credit Card", "Delivered"),
+        ("ORD-1002", "CUST-02", d_expired, d_expired, d_expired, "USPS", "9400111202", "Delivered", 40.00, "PayPal",
+         "Delivered"),
+        ("ORD-1003", "CUST-03", d_yesterday, None, d_tomorrow, "UPS", "1Z999AA10123456784", "In Transit", 95.00,
+         "Credit Card", "Active"),
+        ("ORD-1004", "CUST-04", d_today, None, None, None, None, "Processing", 50.00, "Credit Card", "Active")
     ]
     cursor.executemany("INSERT OR IGNORE INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", orders)
 
@@ -135,7 +138,8 @@ def init_db():
         ("ORD-1001", "BOOK-101", 1, 45.00, "Delivered"),
         ("ORD-1002", "BOOK-102", 1, 40.00, "Delivered"),
         ("ORD-1003", "BOOK-101", 1, 45.00, "Active"),
-        ("ORD-1003", "BOOK-103", 1, 50.00, "Active")
+        ("ORD-1003", "BOOK-103", 1, 50.00, "Active"),
+        ("ORD-1004", "BOOK-104", 1, 50.00, "Active")
     ]
     cursor.executemany("INSERT OR IGNORE INTO order_items (order_id, book_id, quantity, unit_price, item_status) VALUES (?, ?, ?, ?, ?)", items)
 
