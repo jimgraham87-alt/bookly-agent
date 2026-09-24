@@ -237,6 +237,82 @@ def normalize_order_id(order_id: str) -> str:
 
     return cleaned.upper()
 
+def get_current_date() -> str:
+    from datetime import date
+    return date.today().isoformat()
+
+def cancel_order(order_id: str, email: str) -> str:
+    """Cancels an order that has not yet shipped and reverses the charge.
+
+        Args:
+            order_id: The order identifier (e.g., 'ORD-1001', '1001', or 'ORD1001').
+            email: The customer's email address, used to verify identity.
+        """
+    order_id_clean = normalize_order_id(order_id)
+    email_clean = email.strip().lower()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    SELECT o.order_id, o.shipping_status, o.order_status
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.customer_id
+    WHERE LOWER(o.order_id) = LOWER(?) AND LOWER(c.email) = LOWER(?)
+    """, (order_id_clean, email_clean))
+    order = cursor.fetchone()
+
+    if not order:
+        conn.close()
+        return json.dumps({"status": "failed", "reason": "Order ID or customer email verification failed."})
+
+    if order["shipping_status"] != "Processing":
+        conn.close()
+        return json.dumps({
+            "status": "failed",
+            "reason": f"Order '{order_id_clean}' has already shipped (status: {order['shipping_status']}) and can no longer be cancelled. It can still be returned once delivered."
+        })
+
+    cursor.execute(
+        "UPDATE orders SET order_status = 'Cancelled by customer', shipping_status = 'Cancelled' WHERE order_id = ?",
+        (order["order_id"],)
+    )
+    cursor.execute(
+        "UPDATE order_items SET item_status = 'Cancelled' WHERE order_id = ?",
+        (order["order_id"],)
+    )
+    conn.commit()
+    conn.close()
+
+    return json.dumps({
+        "status": "success",
+        "order_id": order["order_id"],
+        "message": "Order cancelled before shipment. Payment will be reversed to the original payment method."
+    })
+
+
+def add_to_cart(book_id: str) -> str:
+    """Adds a book from the catalog to the customer's cart.
+
+        Args:
+            book_id: The book identifier (e.g., 'BOOK-101').
+        """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT book_id, title, price FROM books WHERE book_id = ?", (book_id.strip(),))
+    book = cursor.fetchone()
+    conn.close()
+
+    if not book:
+        return json.dumps({"status": "failed", "reason": f"Book ID '{book_id}' was not found in the catalog."})
+
+    return json.dumps({
+        "status": "success",
+        "book_id": book["book_id"],
+        "title": book["title"],
+        "price": book["price"]
+    })
+
 # --- 2. Function Calling Tool Schemas ---
 
 tools_schema = [
@@ -305,5 +381,8 @@ tools_schema = [
 tool_mapping = {
     "lookup_order": lookup_order,
     "process_refund": process_refund,
-    "escalate_to_human": escalate_to_human
+    "escalate_to_human": escalate_to_human,
+    "get_current_date": get_current_date,
+    "cancel_order": cancel_order,
+    "add_to_cart": add_to_cart
 }

@@ -1,3 +1,0 @@
-[build]
-  command = "python run_site.py"
-  publish = "."  # or "dist" / "public" if your script puts files in a folder
