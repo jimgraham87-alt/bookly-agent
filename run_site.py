@@ -15,16 +15,6 @@ from database import reset_db
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
-# Fallback genre map in case 'genre' column is not in your books table yet
-DEFAULT_GENRE_MAP = {
-    "The Pragmatic Programmer": "Software Engineering",
-    "How to build an AI chatbot in 4 hours for dummies": "Software Engineering",
-    "Refactoring": "Software Engineering",
-    "Designing Data-Intensive Applications": "Distributed Systems & Cloud",
-    "Building Microservices": "Distributed Systems & Cloud",
-}
-
-
 def get_store_books_by_genre():
     """Fetches unique books from SQLite and groups them into up to 2 genres (max 4 books each)."""
     conn = sqlite3.connect("bookly.db", timeout=20.0)
@@ -121,28 +111,23 @@ async def lifespan(app: FastAPI):
     reset_agent()
     yield
 
-
 app = FastAPI(title="Bookly Storefront & Support Agent", lifespan=lifespan)
 
+import re
 
-class ChatRequest(BaseModel):
-    message: str
-
-
-session_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
+BOOK_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 @app.get("/images/{book_id}")
 async def get_book_image(book_id: str):
     """Serves image file matching book_id with or without extensions (.png, .jpg, .jpeg, .webp)."""
-    search_dirs = [IMAGE_DIR, "."]
-    extensions = ["", ".png", ".jpg", ".jpeg", ".webp"]
+    if not BOOK_ID_PATTERN.match(book_id):
+        raise HTTPException(status_code=404, detail="Image not found")
 
-    for d in search_dirs:
-        for ext in extensions:
-            candidate = os.path.join(d, f"{book_id}{ext}")
-            if os.path.isfile(candidate):
-                return FileResponse(candidate)
+    extensions = ["", ".png", ".jpg", ".jpeg", ".webp"]
+    for ext in extensions:
+        candidate = os.path.join(IMAGE_DIR, f"{book_id}{ext}")
+        if os.path.isfile(candidate):
+            return FileResponse(candidate)
 
     raise HTTPException(status_code=404, detail="Image not found")
 
@@ -541,6 +526,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       word-wrap: break-word; 
       white-space: pre-wrap; /* Preserves paragraphs, indentation, and line breaks */
     }
+    
+    .badge-sales { background: #e0f2f1; color: #004d40; }
+    
+    .badge-info { background: #e1f5fe; color: #01579b; }
   </style>
 </head>
 <body>
@@ -683,6 +672,47 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           <div>
             <div class="prompt-preview">"Can you tell me more about Designing Data-Intensive Applications?"</div>
             <button class="btn-test-run" onclick="runTestCase('Can you tell me more about Designing Data-Intensive Applications?')">Run Test 💬</button>
+          </div>
+        </div>
+        <!-- Test 8 -->
+        <div class="test-card">
+          <div class="test-card-top">
+            <span class="test-badge badge-info">Clarifying Question</span>
+            <div class="test-title">8. Shipping Inquiry — Missing Destination</div>
+            <div class="test-meta"><strong>Context:</strong> Customer asks about shipping without naming a destination.</div>
+            <div class="test-expected"><strong>Expected Behavior:</strong> Paige does not guess a country or call get_shipping_info. She asks which country the customer is shipping to first.</div>
+          </div>
+          <div>
+            <div class="prompt-preview">"How long does shipping take?"</div>
+            <button class="btn-test-run" onclick="runTestCase('How long does shipping take?')">Run Test 💬</button>
+          </div>
+        </div>
+
+        <!-- Test 9 -->
+        <div class="test-card">
+          <div class="test-card-top">
+            <span class="test-badge badge-info">Regional Shipping Rates</span>
+            <div class="test-title">9. Shipping Cost & Time by Region</div>
+            <div class="test-meta"><strong>Context:</strong> Destination is provided in the same message.</div>
+            <div class="test-expected"><strong>Expected Behavior:</strong> Calls get_shipping_info("Germany"), matches it to the European Union rate, and presents both standard and express cost/time.</div>
+          </div>
+          <div>
+            <div class="prompt-preview">"How much would it cost to ship to Germany, and how long would it take?"</div>
+            <button class="btn-test-run" onclick="runTestCase('How much would it cost to ship to Germany, and how long would it take?')">Run Test 💬</button>
+          </div>
+        </div>
+
+        <!-- Test 10 -->
+        <div class="test-card">
+          <div class="test-card-top">
+            <span class="test-badge badge-info">General Policy Lookup</span>
+            <div class="test-title">10. Password Reset Help</div>
+            <div class="test-meta"><strong>Context:</strong> General account question, unrelated to a specific order.</div>
+            <div class="test-expected"><strong>Expected Behavior:</strong> Calls get_store_policy rather than answering from memory, and relays the actual reset steps and link expiry.</div>
+          </div>
+          <div>
+            <div class="prompt-preview">"I forgot my password, how do I get back into my account?"</div>
+            <button class="btn-test-run" onclick="runTestCase('I forgot my password, how do I get back into my account?')">Run Test 💬</button>
           </div>
         </div>
       </div>

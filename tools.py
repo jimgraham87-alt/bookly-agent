@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import json
 import uuid
@@ -26,9 +27,8 @@ def lookup_order(order_id: str, email: str) -> str:
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Your SQL query here...
 
-    # Query order with customer email verification gate
+    # Query order with customer email verification
     query_order = """
     SELECT o.order_id, c.name, c.email, o.order_date, o.delivery_date, 
            o.estimated_delivery, o.carrier, o.tracking_number, 
@@ -80,9 +80,6 @@ def lookup_order(order_id: str, email: str) -> str:
         "order_status": order_row["order_status"],
         "items": items
     })
-
-
-### **Updated** **process\_refund** **Implementation (** **tools.py** **)**
 
 def process_refund(order_id: str, email: str, book_id: str, reason: str = "Unwanted") -> str:
     """Deterministic business logic gate for initiating a return and updating database state."""
@@ -237,6 +234,51 @@ def normalize_order_id(order_id: str) -> str:
 
     return cleaned.upper()
 
+def lookup_book(query: str) -> str:
+    """Looks up a book in the Bookly catalog by title or book ID.
+
+        Args:
+            query: The book title (full or partial) or book ID (e.g., 'BOOK-101') the customer asked about.
+        """
+    q = query.strip()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    SELECT book_id, title, author, release_year, genre, rating, price, series_name, series_order
+    FROM books WHERE LOWER(book_id) = LOWER(?)
+    """, (q,))
+    row = cursor.fetchone()
+
+    if not row:
+        cursor.execute("""
+        SELECT book_id, title, author, release_year, genre, rating, price, series_name, series_order
+        FROM books WHERE LOWER(title) LIKE LOWER(?)
+        """, (f"%{q}%",))
+        row = cursor.fetchone()
+
+    conn.close()
+
+    if not row:
+        return json.dumps({
+            "found": False,
+            "message": f"'{query}' is not in the Bookly catalog. You may still know this book from general knowledge, but never state a price or offer to add it to cart, since Bookly doesn't actually sell it."
+        })
+
+    return json.dumps({
+        "found": True,
+        "book_id": row["book_id"],
+        "title": row["title"],
+        "author": row["author"],
+        "release_year": row["release_year"],
+        "genre": row["genre"],
+        "rating": row["rating"],
+        "price": row["price"],
+        "series_name": row["series_name"],
+        "series_order": row["series_order"]
+    })
+
+
 def get_current_date() -> str:
     from datetime import date
     return date.today().isoformat()
@@ -291,6 +333,137 @@ def cancel_order(order_id: str, email: str) -> str:
     })
 
 
+# --- Shipping & store policy: grounded in sources/bookly_policies.pdf ---
+# Unlike lookup_order/process_refund (which read SQLite), these two tools parse the
+# actual PDF file at runtime via pdfplumber. Nothing here duplicates the PDF's content
+# in Python — the numbers and policy text the customer sees are extracted live from the
+# document, so editing the PDF alone changes what the agent says, no code deploy needed.
+# The only things kept in code are interpretation logic that isn't "content" at all:
+# which country names map to which region, and which customer phrasing maps to which
+# section heading.
+
+import pdfplumber
+
+POLICY_PDF_PATH = os.path.join("sources", "bookly_policies.pdf")
+
+SHIPPING_ALIASES = {
+    "United States": ["us", "usa", "u.s.", "u.s.a.", "united states", "united states of america", "america"],
+    "Canada": ["canada", "ca"],
+    "United Kingdom": ["uk", "u.k.", "united kingdom", "great britain", "britain", "england",
+                       "scotland", "wales", "northern ireland"],
+    "European Union": ["eu", "europe", "european union", "germany", "france", "spain", "italy",
+                        "netherlands", "ireland", "belgium", "portugal", "austria", "sweden",
+                        "denmark", "poland"],
+    "Australia & New Zealand": ["australia", "new zealand", "au", "nz", "aus"]
+}
+
+POLICY_TOPIC_KEYWORDS = {
+    "Resetting Your Password": ["password", "reset", "login", "log in", "forgot", "account access"],
+    "Accepted Payment Methods": ["payment", "credit card", "paypal", "pay for", "way to pay", "how do you pay"],
+    "Changing or Cancelling an Order": ["change order", "modify order", "edit order", "update address", "cancel"],
+    "Returns & Refunds": ["return", "refund", "exchange"],
+    "Support Hours": ["hours", "contact", "phone", "call", "support hours"]
+}
+
+_policy_doc_cache = None  # populated on first tool call, then reused for the process lifetime
+
+
+def _load_policy_document():
+    """Parses sources/bookly_policies.pdf once and caches the result: the shipping
+    table's rows, and each general-policy section's body text, keyed by heading."""
+    global _policy_doc_cache
+    if _policy_doc_cache is not None:
+        return _policy_doc_cache
+
+    shipping_rows = []
+    full_text = ""
+
+    with pdfplumber.open(POLICY_PDF_PATH) as pdf:
+        for page in pdf.pages:
+            full_text += (page.extract_text() or "") + "\n"
+            for table in page.extract_tables():
+                if table and table[0] and table[0][0] == "Region":
+                    shipping_rows.extend(table[1:])
+
+    sections = {}
+    headings = list(POLICY_TOPIC_KEYWORDS.keys())
+    for i, heading in enumerate(headings):
+        start = full_text.find(heading)
+        if start == -1:
+            continue
+        start += len(heading)
+        end = len(full_text)
+        for other in headings[i + 1:]:
+            pos = full_text.find(other, start)
+            if pos != -1:
+                end = min(end, pos)
+        sections[heading] = full_text[start:end].strip().replace("\n", " ")
+
+    _policy_doc_cache = {"shipping_rows": shipping_rows, "sections": sections}
+    return _policy_doc_cache
+
+
+def get_shipping_info(country: str) -> str:
+    """Looks up shipping cost and delivery time for a destination country, read live
+        from the shipping table in sources/bookly_policies.pdf.
+
+        Args:
+            country: The destination country or region the customer wants to ship to.
+        """
+    doc = _load_policy_document()
+    q = country.strip().lower().rstrip(".")
+
+    target_region = None
+    for region, aliases in SHIPPING_ALIASES.items():
+        if q in aliases:
+            target_region = region
+            break
+
+    def row_to_dict(row, matched):
+        return {
+            "matched": matched,
+            "region": row[0].replace("\n", " "),
+            "standard_days": row[1].replace("\n", " "),
+            "standard_cost": row[2],
+            "express_days": row[3].replace("\n", " "),
+            "express_cost": row[4],
+            "free_standard_threshold": row[5]
+        }
+
+    if target_region:
+        for row in doc["shipping_rows"]:
+            if row[0] and row[0].replace("\n", " ") == target_region:
+                return json.dumps(row_to_dict(row, True))
+
+    for row in doc["shipping_rows"]:
+        if row[0] and "Rest of World" in row[0]:
+            result = row_to_dict(row, False)
+            result["note"] = f"'{country}' isn't one of our standard shipping zones, so this is our Rest of World rate."
+            return json.dumps(result)
+
+    return json.dumps({"matched": False, "error": "Shipping information is temporarily unavailable."})
+
+
+def get_store_policy(topic: str) -> str:
+    """Looks up Bookly's policy on a general topic (password reset, payment methods,
+        order changes/cancellation, returns overview, or support hours), read live from
+        sources/bookly_policies.pdf.
+
+        Args:
+            topic: What the customer is asking about, in their own words (e.g. 'how do I reset my password').
+        """
+    doc = _load_policy_document()
+    q = topic.strip().lower()
+
+    for heading, keywords in POLICY_TOPIC_KEYWORDS.items():
+        if any(kw in q for kw in keywords):
+            text = doc["sections"].get(heading)
+            if text:
+                return json.dumps({"matched": True, "topic": heading, "text": text})
+
+    return json.dumps({"matched": False, "available_topics": list(doc["sections"].keys())})
+
+
 def add_to_cart(book_id: str) -> str:
     """Adds a book from the catalog to the customer's cart.
 
@@ -312,77 +485,3 @@ def add_to_cart(book_id: str) -> str:
         "title": book["title"],
         "price": book["price"]
     })
-
-# --- 2. Function Calling Tool Schemas ---
-
-tools_schema = [
-    {
-        "type": "function",
-        "function": {
-            "name": "lookup_order",
-            "description": "Look up tracking, delivery status, and items for an order. Requires BOTH order_id and email.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "order_id": {"type": "string", "description": "The order ID, e.g., 'ORD-1001'"},
-                    "email": {"type": "string", "description": "The customer's email address"}
-                },
-                "required": ["order_id", "email"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "process_refund",
-            "description": "Process a return and refund for a specific item in an order. Requires order_id, email, and the book_id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "order_id": {"type": "string", "description": "The order ID, e.g., 'ORD-1001'"},
-                    "email": {"type": "string", "description": "The customer's email address"},
-                    "book_id": {"type": "string", "description": "The specific book identifier, e.g., 'BOOK-101'"},
-                    "reason": {
-                        "type": "string",
-                        "description": "Optional reason for return (e.g., 'Damaged', 'Unwanted', 'Wrong Item')"
-                    }
-                },
-                "required": ["order_id", "email", "book_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "escalate_to_human",
-            "description": "Escalates complex issues, explicit requests for a representative/human, or out-of-policy disputes to a human support agent.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": "Short category or reason for the transfer (e.g., 'Customer requested human agent', 'Damaged goods exchange')"
-                    },
-                    "summary": {
-                        "type": "string",
-                        "description": "A concise 1-2 sentence overview of the user's issue and what has been attempted so far."
-                    },
-                    "order_id": {
-                        "type": "string",
-                        "description": "The order ID if mentioned, otherwise leave null or empty."
-                    }
-                },
-                "required": ["reason", "summary"]
-            }
-        }
-    }
-]
-
-tool_mapping = {
-    "lookup_order": lookup_order,
-    "process_refund": process_refund,
-    "escalate_to_human": escalate_to_human,
-    "get_current_date": get_current_date,
-    "cancel_order": cancel_order,
-    "add_to_cart": add_to_cart
-}
