@@ -103,7 +103,7 @@ def init_db():
     # Seed Books
     books = [
         ("BOOK-101", "The Pragmatic Programmer", "Andrew Hunt, David Thomas", 1999, "Technology", 4.8, 1, None, None, 45.00),
-        ("BOOK-102", "How to build an AI chatbot in 4 hours for dummies", "Jesse Zhang", 2023, "Technology", 4.6, 1, None, None, 40.00),
+        ("BOOK-102", "How to build an AI chatbot in 4 hours for dummies", "Jesse Zhang", 2023, "Technology", 5, 1, None, None, 40.00),
         ("BOOK-103", "Designing Data-Intensive Applications", "Martin Kleppmann", 2017, "Technology", 4.9, 0, None, None, 50.00),
         ("BOOK-104", "Robopocalypse", "Daniel H. Wilson", 2011, "Sci-Fi", 4.9, 0, None, None, 50.00),
         ("BOOK-201", "Dune", "Frank Herbert", 1965, "Sci-Fi", 4.7, 1, "Dune Chronicles", 1, 25.00),

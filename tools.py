@@ -3,6 +3,7 @@ import sqlite3
 import json
 import uuid
 import re
+import pdfplumber
 from datetime import datetime
 
 DB_PATH = "bookly.db"
@@ -347,16 +348,8 @@ def cancel_order(order_id: str, email: str) -> str:
     })
 
 
-# --- Shipping & store policy: grounded in sources/bookly_policies.pdf ---
-# Unlike lookup_order/process_refund (which read SQLite), these two tools parse the
-# actual PDF file at runtime via pdfplumber. Nothing here duplicates the PDF's content
-# in Python — the numbers and policy text the customer sees are extracted live from the
-# document, so editing the PDF alone changes what the agent says, no code deploy needed.
-# The only things kept in code are interpretation logic that isn't "content" at all:
-# which country names map to which region, and which customer phrasing maps to which
-# section heading.
+# Shipping & store policy: grounded in sources/bookly_policies.pdf
 
-import pdfplumber
 
 POLICY_PDF_PATH = os.path.join("sources", "bookly_policies.pdf")
 

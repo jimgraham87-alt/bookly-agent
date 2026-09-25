@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import re
 from collections import defaultdict
 from contextlib import asynccontextmanager
 
@@ -23,41 +24,18 @@ def get_store_books_by_genre():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Check available columns in the books table
-    cursor.execute("PRAGMA table_info(books)")
-    columns = [row["name"] for row in cursor.fetchall()]
-    has_genre = "genre" in columns
-
-    if has_genre:
-        cursor.execute("""
-            SELECT DISTINCT book_id, title, price, author, release_year, genre
-            FROM books 
-            ORDER BY title ASC
-        """)
-    else:
-        cursor.execute("""
-            SELECT DISTINCT book_id, title, price, author, release_year
-            FROM books 
-            ORDER BY title ASC
-        """)
-
+    cursor.execute("""
+        SELECT DISTINCT book_id, title, price, author, release_year, genre
+        FROM books
+        ORDER BY title ASC
+    """)
     rows = cursor.fetchall()
     conn.close()
 
-    # Group into genres
     catalog_by_genre = defaultdict(list)
-    for idx, r in enumerate(rows):
-        title = r["title"]
-        if has_genre and r["genre"]:
-            genre = r["genre"]
-        else:
-            genre = DEFAULT_GENRE_MAP.get(
-                title, "Software Engineering" if idx % 2 == 0 else "Distributed Systems & Cloud"
-            )
+    for r in rows:
+        catalog_by_genre[r["genre"]].append(dict(r))
 
-        catalog_by_genre[genre].append(dict(r))
-
-    # Restrict to maximum 2 genres, up to 4 books per genre
     limited_catalog = {}
     for genre, books in list(catalog_by_genre.items())[:2]:
         limited_catalog[genre] = books[:4]
@@ -115,8 +93,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Bookly Storefront & Support Agent", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-import re
 
 BOOK_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -549,7 +525,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         if (data.escalated) botMsg.classList.add('escalated');
 
         // Preserve cart incrementation
-        if (data.added_to_cart || /(added (it |the book )?to your cart|have added)/i.test(data.reply)) {
+        if (data.added_to_cart) {
           incrementCart();
         }
       } catch (err) {
